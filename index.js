@@ -186,27 +186,39 @@ module.exports = (params) => {
       if (client !== null) {
         // If no args are passed in a transaction, ignore query
         if (this && this.rollback && args.length === 0) { return resolve([]) }
-        client.query(...args, async (err, results) => {
-          if (err && err.code === 'PROTOCOL_SEQUENCE_TIMEOUT') {
-            client.destroy() // destroy connection on timeout
-            resetClient() // reset the client
-            reject(err) // reject the promise with the error
-          } else if (
-            err && (/^PROTOCOL_ENQUEUE_AFTER_/.test(err.code) 
-            || err.code === 'PROTOCOL_CONNECTION_LOST' 
-            || err.code === 'EPIPE')
-          ) {
+
+        try {
+          client.query(...args, async (err, results) => {
+            if (err && err.code === 'PROTOCOL_SEQUENCE_TIMEOUT') {
+              client.destroy() // destroy connection on timeout
+              resetClient() // reset the client
+              reject(err) // reject the promise with the error
+            } else if (
+                err && (/^PROTOCOL_ENQUEUE_AFTER_/.test(err.code)
+                || err.code === 'PROTOCOL_CONNECTION_LOST'
+                || err.code === 'EPIPE')
+            ) {
+              resetClient() // reset the client
+              return resolve(query(...args)) // attempt the query again
+            } else if (err) {
+              if (this && this.rollback) {
+                await query('ROLLBACK')
+                this.rollback(err)
+              }
+              reject(err)
+            }
+            return resolve(results)
+          })
+        }catch (error){
+          console.log("Error querying database",error)
+          if (typeof error.code !== "undefined" && error.code === "PROTOCOL_CONNECTION_LOST") {
             resetClient() // reset the client
             return resolve(query(...args)) // attempt the query again
-          } else if (err) {
-            if (this && this.rollback) {
-              await query('ROLLBACK')
-              this.rollback(err)
-            }
-            reject(err)
           }
-          return resolve(results)
-        })
+        }
+
+
+
       }
     })
 
